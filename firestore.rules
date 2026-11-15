@@ -1,0 +1,642 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: deny everything by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Global Helpers (Phase 3 Primitives)
+    // -------------------------------------------------------------------------
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidInviteCodeString(code) {
+      return code is string && code.size() >= 4 && code.size() <= 24 && code.matches('^[A-Z0-9\\-]+$');
+    }
+
+    function isValidUidList(arr) {
+      return arr is list && arr.size() >= 1 && arr.size() <= 25 && arr[0] is string;
+    }
+
+    function isValidOptionalUidList(arr) {
+      return arr is list && arr.size() <= 25 && (arr.size() == 0 || arr[0] is string);
+    }
+
+    function isFamilyMember(familyId) {
+      return isSignedIn() && exists(/databases/$(database)/documents/families/$(familyId)/members/$(request.auth.uid));
+    }
+
+    function isFamilyAdmin(familyId) {
+      return isFamilyMember(familyId)
+        && get(/databases/$(database)/documents/families/$(familyId)/members/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // -------------------------------------------------------------------------
+    // Entity Validation Blueprints (Anti-Update-Gap)
+    // -------------------------------------------------------------------------
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'email', 'preferredLocale', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'displayName', 'email', 'photoURL', 'activeFamilyId', 'preferredLocale', 'fcmToken', 'createdAt', 'updatedAt'])
+        && isValidId(data.uid)
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 160
+        && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 500))
+        && (!('activeFamilyId' in data) || data.activeFamilyId == '' || isValidId(data.activeFamilyId))
+        && data.preferredLocale in ['en', 'ar']
+        && (!('fcmToken' in data) || (data.fcmToken is string && data.fcmToken.size() <= 512))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidUserMembership(data) {
+      return data.keys().hasAll(['familyId', 'familyName', 'role', 'joinedAt'])
+        && data.keys().hasOnly(['familyId', 'familyName', 'role', 'joinedAt'])
+        && isValidId(data.familyId)
+        && data.familyName is string && data.familyName.size() >= 1 && data.familyName.size() <= 80
+        && data.role in ['admin', 'member']
+        && data.joinedAt is timestamp;
+    }
+
+    function isValidInviteCode(data) {
+      return data.keys().hasAll(['code', 'familyId', 'familyName', 'ownerId', 'createdAt'])
+        && data.keys().hasOnly(['code', 'familyId', 'familyName', 'ownerId', 'createdAt'])
+        && isValidInviteCodeString(data.code)
+        && isValidId(data.familyId)
+        && data.familyName is string && data.familyName.size() >= 1 && data.familyName.size() <= 80
+        && isValidId(data.ownerId)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidFamily(data) {
+      return data.keys().hasAll(['id', 'name', 'inviteCode', 'ownerId', 'memberUids', 'weeklyRotationDay', 'rotationCount', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'name', 'inviteCode', 'ownerId', 'memberUids', 'weeklyRotationDay', 'rotationCount', 'lastBalancedAt', 'createdAt', 'updatedAt'])
+        && isValidId(data.id)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 80
+        && isValidInviteCodeString(data.inviteCode)
+        && isValidId(data.ownerId)
+        && isValidUidList(data.memberUids)
+        && data.weeklyRotationDay is int && data.weeklyRotationDay >= 0 && data.weeklyRotationDay <= 6
+        && data.rotationCount is int && data.rotationCount >= 0 && data.rotationCount <= 100000
+        && (!('lastBalancedAt' in data) || data.lastBalancedAt == null || data.lastBalancedAt is timestamp)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidFamilyMember(data) {
+      return data.keys().hasAll([
+          'uid', 'familyId', 'memberUids', 'displayName', 'role',
+          'availableHoursPerWeek', 'energyLevel', 'points', 'weeklyLoadScore',
+          'heavyTasksCompleted', 'tasksCompletedCount', 'notificationsEnabled',
+          'joinedAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid', 'familyId', 'memberUids', 'displayName', 'photoURL', 'role',
+          'availableHoursPerWeek', 'energyLevel', 'points', 'weeklyLoadScore',
+          'heavyTasksCompleted', 'tasksCompletedCount', 'inviteCodeUsed',
+          'lastCompletedTaskId', 'lastRedemptionId', 'notificationsEnabled',
+          'joinedAt', 'updatedAt'
+        ])
+        && isValidId(data.uid)
+        && isValidId(data.familyId)
+        && isValidUidList(data.memberUids)
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80
+        && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 500))
+        && data.role in ['admin', 'member']
+        && data.availableHoursPerWeek is number && data.availableHoursPerWeek >= 1 && data.availableHoursPerWeek <= 168
+        && data.energyLevel in ['low', 'medium', 'high']
+        && data.points is int && data.points >= 0 && data.points <= 1000000
+        && data.weeklyLoadScore is number && data.weeklyLoadScore >= 0 && data.weeklyLoadScore <= 100000
+        && data.heavyTasksCompleted is int && data.heavyTasksCompleted >= 0 && data.heavyTasksCompleted <= 100000
+        && data.tasksCompletedCount is int && data.tasksCompletedCount >= 0 && data.tasksCompletedCount <= 100000
+        && (!('inviteCodeUsed' in data) || (data.inviteCodeUsed is string && data.inviteCodeUsed.size() <= 24))
+        && (!('lastCompletedTaskId' in data) || data.lastCompletedTaskId == null || isValidId(data.lastCompletedTaskId))
+        && (!('lastRedemptionId' in data) || data.lastRedemptionId == null || isValidId(data.lastRedemptionId))
+        && data.notificationsEnabled is bool
+        && data.joinedAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidFamilyTask(data) {
+      return data.keys().hasAll([
+          'id', 'familyId', 'memberUids', 'title', 'category', 'difficulty',
+          'estimatedMinutes', 'energyRequired', 'isHeavy', 'recurrence',
+          'pointsValue', 'status', 'assigneeId', 'assigneeName', 'createdBy',
+          'dueAt', 'rotationWeek', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'familyId', 'memberUids', 'title', 'description', 'category',
+          'difficulty', 'estimatedMinutes', 'energyRequired', 'isHeavy',
+          'recurrence', 'pointsValue', 'status', 'assigneeId', 'assigneeName',
+          'createdBy', 'dueAt', 'completedAt', 'completedBy', 'rotationWeek',
+          'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.familyId)
+        && isValidUidList(data.memberUids)
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 120
+        && (!('description' in data) || (data.description is string && data.description.size() <= 500))
+        && data.category in ['chores', 'groceries', 'bills', 'maintenance', 'childcare']
+        && data.difficulty is int && data.difficulty >= 1 && data.difficulty <= 5
+        && data.estimatedMinutes is int && data.estimatedMinutes >= 5 && data.estimatedMinutes <= 480
+        && data.energyRequired in ['low', 'medium', 'high']
+        && data.isHeavy is bool
+        && data.recurrence in ['once', 'daily', 'weekly']
+        && data.pointsValue is int && data.pointsValue >= 5 && data.pointsValue <= 500
+        && data.status in ['pending', 'in_progress', 'completed']
+        && isValidId(data.assigneeId)
+        && data.assigneeName is string && data.assigneeName.size() >= 1 && data.assigneeName.size() <= 80
+        && isValidId(data.createdBy)
+        && data.dueAt is timestamp
+        && (!('completedAt' in data) || data.completedAt == null || data.completedAt is timestamp)
+        && (!('completedBy' in data) || data.completedBy == null || isValidId(data.completedBy))
+        && data.rotationWeek is int && data.rotationWeek >= 0 && data.rotationWeek <= 100000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTaskSwap(data) {
+      return data.keys().hasAll([
+          'id', 'familyId', 'memberUids', 'taskId', 'taskTitle',
+          'requesterId', 'requesterName', 'targetMemberId', 'targetMemberName',
+          'reason', 'status', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'familyId', 'memberUids', 'taskId', 'taskTitle',
+          'requesterId', 'requesterName', 'targetMemberId', 'targetMemberName',
+          'reason', 'status', 'resolvedBy', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.familyId)
+        && isValidUidList(data.memberUids)
+        && isValidId(data.taskId)
+        && data.taskTitle is string && data.taskTitle.size() >= 1 && data.taskTitle.size() <= 120
+        && isValidId(data.requesterId)
+        && data.requesterName is string && data.requesterName.size() >= 1 && data.requesterName.size() <= 80
+        && isValidId(data.targetMemberId)
+        && data.targetMemberName is string && data.targetMemberName.size() >= 1 && data.targetMemberName.size() <= 80
+        && data.reason is string && data.reason.size() >= 1 && data.reason.size() <= 280
+        && data.status in ['pending', 'accepted', 'declined']
+        && (!('resolvedBy' in data) || data.resolvedBy == null || isValidId(data.resolvedBy))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidReward(data) {
+      return data.keys().hasAll([
+          'id', 'familyId', 'memberUids', 'title', 'costPoints',
+          'category', 'isActive', 'createdBy', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'familyId', 'memberUids', 'title', 'description', 'costPoints',
+          'category', 'isActive', 'createdBy', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.familyId)
+        && isValidUidList(data.memberUids)
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 100
+        && (!('description' in data) || (data.description is string && data.description.size() <= 300))
+        && data.costPoints is int && data.costPoints >= 10 && data.costPoints <= 5000
+        && data.category in ['exemption', 'leisure', 'treat', 'privilege']
+        && data.isActive is bool
+        && isValidId(data.createdBy)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidRedemption(data) {
+      return data.keys().hasAll([
+          'id', 'familyId', 'memberUids', 'rewardId', 'rewardTitle',
+          'costPoints', 'memberId', 'memberName', 'status', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'familyId', 'memberUids', 'rewardId', 'rewardTitle',
+          'costPoints', 'memberId', 'memberName', 'status', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.familyId)
+        && isValidUidList(data.memberUids)
+        && isValidId(data.rewardId)
+        && data.rewardTitle is string && data.rewardTitle.size() >= 1 && data.rewardTitle.size() <= 100
+        && data.costPoints is int && data.costPoints >= 10 && data.costPoints <= 5000
+        && isValidId(data.memberId)
+        && data.memberName is string && data.memberName.size() >= 1 && data.memberName.size() <= 80
+        && data.status in ['pending', 'fulfilled']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll([
+          'id', 'familyId', 'memberUids', 'recipientId', 'type',
+          'title', 'body', 'readBy', 'createdBy', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'familyId', 'memberUids', 'recipientId', 'type',
+          'title', 'body', 'relatedTaskId', 'readBy', 'createdBy', 'createdAt'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.familyId)
+        && isValidUidList(data.memberUids)
+        && data.recipientId is string && data.recipientId.size() >= 1 && data.recipientId.size() <= 128
+        && data.type in ['task_assigned', 'deadline_near', 'task_completed', 'swap_requested', 'swap_resolved', 'reward_redeemed', 'weekly_rotation']
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 120
+        && data.body is string && data.body.size() >= 1 && data.body.size() <= 300
+        && (!('relatedTaskId' in data) || data.relatedTaskId == null || isValidId(data.relatedTaskId))
+        && isValidOptionalUidList(data.readBy)
+        && isValidId(data.createdBy)
+        && data.createdAt is timestamp;
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection Rules
+    // -------------------------------------------------------------------------
+
+    match /users/{userId} {
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow list: if false;
+      allow create: if isVerifiedUser()
+        && isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming())
+        && incoming().uid == userId
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming())
+        && incoming().uid == existing().uid
+        && incoming().email == existing().email
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'displayName', 'photoURL', 'activeFamilyId', 'preferredLocale', 'fcmToken', 'updatedAt'
+        ]);
+      allow delete: if false;
+
+      match /memberships/{familyId} {
+        allow get: if isValidId(userId) && isValidId(familyId) && isOwner(userId);
+        allow list: if isOwner(userId);
+        allow create: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(familyId)
+          && isOwner(userId)
+          && isValidUserMembership(incoming())
+          && incoming().familyId == familyId
+          && incoming().joinedAt == request.time
+          && existsAfter(/databases/$(database)/documents/families/$(familyId)/members/$(userId));
+        allow update: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(familyId)
+          && isOwner(userId)
+          && isValidUserMembership(incoming())
+          && incoming().familyId == existing().familyId
+          && incoming().joinedAt == existing().joinedAt
+          && incoming().diff(existing()).affectedKeys().hasOnly(['familyName', 'role']);
+        allow delete: if isVerifiedUser() && isValidId(userId) && isValidId(familyId) && isOwner(userId);
+      }
+    }
+
+    match /inviteCodes/{code} {
+      allow get: if isSignedIn() && isValidInviteCodeString(code);
+      allow list: if false;
+      allow create: if isVerifiedUser()
+        && isValidInviteCodeString(code)
+        && isValidInviteCode(incoming())
+        && incoming().code == code
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && getAfter(/databases/$(database)/documents/families/$(incoming().familyId)).data.ownerId == request.auth.uid;
+      allow update: if false;
+      allow delete: if isVerifiedUser() && isValidInviteCodeString(code) && existing().ownerId == request.auth.uid;
+    }
+
+    match /families/{familyId} {
+      allow get: if isValidId(familyId) && isFamilyMember(familyId);
+      allow list: if isSignedIn() && request.auth.uid in resource.data.memberUids;
+      allow create: if isVerifiedUser()
+        && isValidId(familyId)
+        && isValidFamily(incoming())
+        && incoming().id == familyId
+        && incoming().ownerId == request.auth.uid
+        && request.auth.uid in incoming().memberUids
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && existsAfter(/databases/$(database)/documents/families/$(familyId)/members/$(request.auth.uid));
+      allow update: if isVerifiedUser()
+        && isValidId(familyId)
+        && isValidFamily(incoming())
+        && incoming().id == existing().id
+        && incoming().ownerId == existing().ownerId
+        && incoming().inviteCode == existing().inviteCode
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (isFamilyAdmin(familyId)
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'name', 'weeklyRotationDay', 'rotationCount', 'lastBalancedAt', 'memberUids', 'updatedAt'
+            ]))
+          || (existsAfter(/databases/$(database)/documents/families/$(familyId)/members/$(request.auth.uid))
+            && incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt'])
+            && request.auth.uid in incoming().memberUids
+            && incoming().memberUids.hasAll(existing().memberUids)
+            && incoming().memberUids.size() == existing().memberUids.size() + 1)
+        );
+      allow delete: if isVerifiedUser()
+        && isValidId(familyId)
+        && isFamilyAdmin(familyId)
+        && existing().ownerId == request.auth.uid;
+
+      match /members/{memberId} {
+        allow get: if isValidId(familyId) && isValidId(memberId) && (isFamilyMember(familyId) || isOwner(memberId));
+        allow list: if isSignedIn() && request.auth.uid in resource.data.memberUids;
+        allow create: if isVerifiedUser()
+          && isValidId(familyId)
+          && isValidId(memberId)
+          && isValidFamilyMember(incoming())
+          && incoming().uid == memberId
+          && incoming().familyId == familyId
+          && incoming().joinedAt == request.time
+          && incoming().updatedAt == request.time
+          && (
+            (isOwner(memberId)
+              && incoming().role == 'admin'
+              && getAfter(/databases/$(database)/documents/families/$(familyId)).data.ownerId == request.auth.uid)
+            || (isOwner(memberId)
+              && incoming().role == 'member'
+              && incoming().points == 0
+              && incoming().weeklyLoadScore == 0
+              && incoming().heavyTasksCompleted == 0
+              && incoming().tasksCompletedCount == 0
+              && incoming().inviteCodeUsed == get(/databases/$(database)/documents/families/$(familyId)).data.inviteCode)
+            || (isFamilyAdmin(familyId) && incoming().points == 0)
+          );
+        allow update: if isVerifiedUser()
+          && isValidId(familyId)
+          && isValidId(memberId)
+          && isValidFamilyMember(incoming())
+          && incoming().uid == existing().uid
+          && incoming().familyId == existing().familyId
+          && incoming().joinedAt == existing().joinedAt
+          && incoming().updatedAt == request.time
+          && (
+            (isFamilyAdmin(familyId)
+              && incoming().diff(existing()).affectedKeys().hasOnly([
+                'displayName', 'photoURL', 'role', 'availableHoursPerWeek', 'energyLevel',
+                'points', 'weeklyLoadScore', 'heavyTasksCompleted', 'tasksCompletedCount',
+                'lastCompletedTaskId', 'lastRedemptionId', 'memberUids', 'notificationsEnabled', 'updatedAt'
+              ]))
+            || (isOwner(memberId)
+              && isFamilyMember(familyId)
+              && incoming().diff(existing()).affectedKeys().hasOnly([
+                'displayName', 'photoURL', 'availableHoursPerWeek', 'energyLevel', 'notificationsEnabled', 'updatedAt'
+              ]))
+            || (isOwner(memberId)
+              && isFamilyMember(familyId)
+              && incoming().diff(existing()).affectedKeys().hasOnly([
+                'points', 'weeklyLoadScore', 'heavyTasksCompleted', 'tasksCompletedCount', 'lastCompletedTaskId', 'updatedAt'
+              ])
+              && incoming().lastCompletedTaskId is string
+              && get(/databases/$(database)/documents/families/$(familyId)/tasks/$(incoming().lastCompletedTaskId)).data.status != 'completed'
+              && getAfter(/databases/$(database)/documents/families/$(familyId)/tasks/$(incoming().lastCompletedTaskId)).data.status == 'completed'
+              && getAfter(/databases/$(database)/documents/families/$(familyId)/tasks/$(incoming().lastCompletedTaskId)).data.completedBy == request.auth.uid
+              && incoming().points == existing().points + get(/databases/$(database)/documents/families/$(familyId)/tasks/$(incoming().lastCompletedTaskId)).data.pointsValue)
+            || (isOwner(memberId)
+              && isFamilyMember(familyId)
+              && incoming().diff(existing()).affectedKeys().hasOnly([
+                'points', 'lastRedemptionId', 'updatedAt'
+              ])
+              && incoming().lastRedemptionId is string
+              && existsAfter(/databases/$(database)/documents/families/$(familyId)/redemptions/$(incoming().lastRedemptionId))
+              && getAfter(/databases/$(database)/documents/families/$(familyId)/redemptions/$(incoming().lastRedemptionId)).data.memberId == request.auth.uid
+              && incoming().points == existing().points - getAfter(/databases/$(database)/documents/families/$(familyId)/redemptions/$(incoming().lastRedemptionId)).data.costPoints)
+          );
+        allow delete: if isVerifiedUser()
+          && isValidId(familyId)
+          && isValidId(memberId)
+          && isFamilyAdmin(familyId)
+          && memberId != request.auth.uid;
+      }
+
+      match /tasks/{taskId} {
+        allow get: if isValidId(familyId) && isValidId(taskId) && isFamilyMember(familyId);
+        allow list: if isSignedIn() && request.auth.uid in resource.data.memberUids;
+        allow create: if isVerifiedUser()
+          && isValidId(familyId)
+          && isValidId(taskId)
+          && isValidFamilyTask(incoming())
+          && incoming().id == taskId
+          && incoming().familyId == familyId
+          && incoming().createdBy == request.auth.uid
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && isFamilyAdmin(familyId);
+        allow update: if isVerifiedUser()
+          && isValidId(familyId)
+          && isValidId(taskId)
+          && isValidFamilyTask(incoming())
+          && incoming().id == existing().id
+          && incoming().familyId == existing().familyId
+          && incoming().createdBy == existing().createdBy
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            (isFamilyAdmin(familyId)
+              && incoming().diff(existing()).affectedKeys().hasOnly([
+                'title', 'description', 'category', 'difficulty', 'estimatedMinutes',
+                'energyRequired', 'isHeavy', 'recurrence', 'pointsValue', 'status',
+                'assigneeId', 'assigneeName', 'dueAt', 'completedAt', 'completedBy',
+                'rotationWeek', 'memberUids', 'updatedAt'
+              ]))
+            || (isFamilyMember(familyId)
+              && existing().status != 'completed'
+              && (existing().assigneeId == request.auth.uid || incoming().status == 'completed')
+              && incoming().diff(existing()).affectedKeys().hasOnly([
+                'status', 'completedAt', 'completedBy', 'updatedAt'
+              ]))
+            || (isFamilyMember(familyId)
+              && existing().status != 'completed'
+              && incoming().assigneeId == request.auth.uid
+              && incoming().diff(existing()).affectedKeys().hasOnly([
+                'assigneeId', 'assigneeName', 'updatedAt'
+              ]))
+          );
+        allow delete: if isVerifiedUser()
+          && isValidId(familyId)
+          && isValidId(taskId)
+          && isFamilyAdmin(familyId);
+      }
+
+      match /swaps/{swapId} {
+        allow get: if isValidId(familyId) && isValidId(swapId) && isFamilyMember(familyId);
+        allow list: if isSignedIn() && request.auth.uid in resource.data.memberUids;
+        allow create: if isVerifiedUser()
+          && isValidId(familyId)
+          && isValidId(swapId)
+          && isValidTaskSwap(incoming())
+          && incoming().id == swapId
+          && incoming().familyId == familyId
+          && incoming().requesterId == request.auth.uid
+          && incoming().status == 'pending'
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && isFamilyMember(familyId)
+          && exists(/databases/$(database)/documents/families/$(familyId)/tasks/$(incoming().taskId));
+        allow update: if isVerifiedUser()
+          && isValidId(familyId)
+          && isValidId(swapId)
+          && isValidTaskSwap(incoming())
+          && incoming().id == existing().id
+          && incoming().familyId == existing().familyId
+          && incoming().taskId == existing().taskId
+          && incoming().requesterId == existing().requesterId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            (isFamilyAdmin(familyId)
+              && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'resolvedBy', 'memberUids', 'updatedAt']))
+            || (isFamilyMember(familyId)
+              && existing().status == 'pending'
+              && existing().targetMemberId == request.auth.uid
+              && incoming().status in ['accepted', 'declined']
+              && incoming().resolvedBy == request.auth.uid
+              && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'resolvedBy', 'updatedAt']))
+          );
+        allow delete: if isVerifiedUser()
+          && isValidId(familyId)
+          && isValidId(swapId)
+          && (isFamilyAdmin(familyId)
+            || (isFamilyMember(familyId) && existing().requesterId == request.auth.uid && existing().status == 'pending'));
+      }
+
+      match /rewards/{rewardId} {
+        allow get: if isValidId(familyId) && isValidId(rewardId) && isFamilyMember(familyId);
+        allow list: if isSignedIn() && request.auth.uid in resource.data.memberUids;
+        allow create: if isVerifiedUser()
+          && isValidId(familyId)
+          && isValidId(rewardId)
+          && isValidReward(incoming())
+          && incoming().id == rewardId
+          && incoming().familyId == familyId
+          && incoming().createdBy == request.auth.uid
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && isFamilyAdmin(familyId);
+        allow update: if isVerifiedUser()
+          && isValidId(familyId)
+          && isValidId(rewardId)
+          && isValidReward(incoming())
+          && incoming().id == existing().id
+          && incoming().familyId == existing().familyId
+          && incoming().createdBy == existing().createdBy
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && isFamilyAdmin(familyId)
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'title', 'description', 'costPoints', 'category', 'isActive', 'memberUids', 'updatedAt'
+          ]);
+        allow delete: if isVerifiedUser()
+          && isValidId(familyId)
+          && isValidId(rewardId)
+          && isFamilyAdmin(familyId);
+      }
+
+      match /redemptions/{redemptionId} {
+        allow get: if isValidId(familyId) && isValidId(redemptionId) && isFamilyMember(familyId);
+        allow list: if isSignedIn() && request.auth.uid in resource.data.memberUids;
+        allow create: if isVerifiedUser()
+          && isValidId(familyId)
+          && isValidId(redemptionId)
+          && isValidRedemption(incoming())
+          && incoming().id == redemptionId
+          && incoming().familyId == familyId
+          && incoming().memberId == request.auth.uid
+          && incoming().status == 'pending'
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && isFamilyMember(familyId)
+          && exists(/databases/$(database)/documents/families/$(familyId)/rewards/$(incoming().rewardId))
+          && get(/databases/$(database)/documents/families/$(familyId)/rewards/$(incoming().rewardId)).data.costPoints == incoming().costPoints
+          && getAfter(/databases/$(database)/documents/families/$(familyId)/members/$(request.auth.uid)).data.points
+            == get(/databases/$(database)/documents/families/$(familyId)/members/$(request.auth.uid)).data.points - incoming().costPoints;
+        allow update: if isVerifiedUser()
+          && isValidId(familyId)
+          && isValidId(redemptionId)
+          && isValidRedemption(incoming())
+          && incoming().id == existing().id
+          && incoming().familyId == existing().familyId
+          && incoming().memberId == existing().memberId
+          && incoming().rewardId == existing().rewardId
+          && incoming().costPoints == existing().costPoints
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && isFamilyAdmin(familyId)
+          && existing().status == 'pending'
+          && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'memberUids', 'updatedAt']);
+        allow delete: if isVerifiedUser()
+          && isValidId(familyId)
+          && isValidId(redemptionId)
+          && isFamilyAdmin(familyId);
+      }
+
+      match /notifications/{notificationId} {
+        allow get: if isValidId(familyId) && isValidId(notificationId) && isFamilyMember(familyId);
+        allow list: if isSignedIn() && request.auth.uid in resource.data.memberUids;
+        allow create: if isVerifiedUser()
+          && isValidId(familyId)
+          && isValidId(notificationId)
+          && isValidNotification(incoming())
+          && incoming().id == notificationId
+          && incoming().familyId == familyId
+          && incoming().createdBy == request.auth.uid
+          && incoming().createdAt == request.time
+          && isFamilyMember(familyId);
+        allow update: if isVerifiedUser()
+          && isValidId(familyId)
+          && isValidId(notificationId)
+          && isValidNotification(incoming())
+          && incoming().id == existing().id
+          && incoming().familyId == existing().familyId
+          && incoming().createdBy == existing().createdBy
+          && incoming().createdAt == existing().createdAt
+          && isFamilyMember(familyId)
+          && (
+            (isFamilyAdmin(familyId)
+              && incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'readBy']))
+            || (incoming().diff(existing()).affectedKeys().hasOnly(['readBy'])
+              && request.auth.uid in incoming().readBy
+              && incoming().readBy.hasAll(existing().readBy))
+          );
+        allow delete: if isVerifiedUser()
+          && isValidId(familyId)
+          && isValidId(notificationId)
+          && isFamilyAdmin(familyId);
+      }
+    }
+  }
+}

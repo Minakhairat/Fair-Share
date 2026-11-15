@@ -1,0 +1,6 @@
+{
+  "name": "FairShare",
+  "description": "Smart family and team responsibility planner with fair workload distribution, real-time Firebase sync, role-based access, rewards, and gentle notifications.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

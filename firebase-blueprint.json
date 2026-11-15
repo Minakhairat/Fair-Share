@@ -1,0 +1,241 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Private user account profile containing PII isolated to the owning user.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "email": { "type": "string", "format": "email", "maxLength": 160 },
+        "photoURL": { "type": "string", "maxLength": 500 },
+        "activeFamilyId": { "type": "string", "maxLength": 128 },
+        "preferredLocale": { "type": "string", "enum": ["en", "ar"] },
+        "fcmToken": { "type": "string", "maxLength": 512 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "displayName", "email", "preferredLocale", "createdAt", "updatedAt"]
+    },
+    "UserMembership": {
+      "title": "UserMembership",
+      "description": "User's index of family workspaces they belong to.",
+      "type": "object",
+      "properties": {
+        "familyId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "familyName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "role": { "type": "string", "enum": ["admin", "member"] },
+        "joinedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["familyId", "familyName", "role", "joinedAt"]
+    },
+    "InviteCode": {
+      "title": "InviteCode",
+      "description": "Lookup index mapping a secret invite code to a family workspace.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "minLength": 4, "maxLength": 24, "pattern": "^[A-Z0-9\\-]+$" },
+        "familyId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "familyName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "familyId", "familyName", "ownerId", "createdAt"]
+    },
+    "Family": {
+      "title": "Family",
+      "description": "Isolated family workspace root document.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "inviteCode": { "type": "string", "minLength": 4, "maxLength": 24, "pattern": "^[A-Z0-9\\-]+$" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberUids": { "type": "array", "description": "Bounded list of up to 25 member UIDs." },
+        "weeklyRotationDay": { "type": "integer" },
+        "rotationCount": { "type": "integer" },
+        "lastBalancedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "inviteCode", "ownerId", "memberUids", "weeklyRotationDay", "rotationCount", "createdAt", "updatedAt"]
+    },
+    "FamilyMember": {
+      "title": "FamilyMember",
+      "description": "Member profile within a family workspace (no PII stored here).",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "familyId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberUids": { "type": "array", "description": "Bounded list of up to 25 member UIDs." },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "photoURL": { "type": "string", "maxLength": 500 },
+        "role": { "type": "string", "enum": ["admin", "member"] },
+        "availableHoursPerWeek": { "type": "number" },
+        "energyLevel": { "type": "string", "enum": ["low", "medium", "high"] },
+        "points": { "type": "integer" },
+        "weeklyLoadScore": { "type": "number" },
+        "heavyTasksCompleted": { "type": "integer" },
+        "tasksCompletedCount": { "type": "integer" },
+        "inviteCodeUsed": { "type": "string", "maxLength": 24 },
+        "lastCompletedTaskId": { "type": "string", "maxLength": 128 },
+        "lastRedemptionId": { "type": "string", "maxLength": 128 },
+        "notificationsEnabled": { "type": "boolean" },
+        "joinedAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "familyId", "memberUids", "displayName", "role", "availableHoursPerWeek", "energyLevel", "points", "weeklyLoadScore", "heavyTasksCompleted", "tasksCompletedCount", "notificationsEnabled", "joinedAt", "updatedAt"]
+    },
+    "FamilyTask": {
+      "title": "FamilyTask",
+      "description": "Shared family responsibility distributed by the FairShare balancing engine.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "familyId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberUids": { "type": "array", "description": "Bounded list of up to 25 member UIDs." },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 500 },
+        "category": { "type": "string", "enum": ["chores", "groceries", "bills", "maintenance", "childcare"] },
+        "difficulty": { "type": "integer" },
+        "estimatedMinutes": { "type": "integer" },
+        "energyRequired": { "type": "string", "enum": ["low", "medium", "high"] },
+        "isHeavy": { "type": "boolean" },
+        "recurrence": { "type": "string", "enum": ["once", "daily", "weekly"] },
+        "pointsValue": { "type": "integer" },
+        "status": { "type": "string", "enum": ["pending", "in_progress", "completed"] },
+        "assigneeId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "assigneeName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "createdBy": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "dueAt": { "type": "string", "format": "date-time" },
+        "completedAt": { "type": "string", "format": "date-time" },
+        "completedBy": { "type": "string", "maxLength": 128 },
+        "rotationWeek": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "familyId", "memberUids", "title", "category", "difficulty", "estimatedMinutes", "energyRequired", "isHeavy", "recurrence", "pointsValue", "status", "assigneeId", "assigneeName", "createdBy", "dueAt", "rotationWeek", "createdAt", "updatedAt"]
+    },
+    "TaskSwapRequest": {
+      "title": "TaskSwapRequest",
+      "description": "Peer-to-peer task swap request between family members.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "familyId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberUids": { "type": "array", "description": "Bounded list of up to 25 member UIDs." },
+        "taskId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "taskTitle": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "requesterId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "requesterName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "targetMemberId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "targetMemberName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 280 },
+        "status": { "type": "string", "enum": ["pending", "accepted", "declined"] },
+        "resolvedBy": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "familyId", "memberUids", "taskId", "taskTitle", "requesterId", "requesterName", "targetMemberId", "targetMemberName", "reason", "status", "createdAt", "updatedAt"]
+    },
+    "RewardPerk": {
+      "title": "RewardPerk",
+      "description": "Redeemable family perk configured by a family admin.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "familyId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberUids": { "type": "array", "description": "Bounded list of up to 25 member UIDs." },
+        "title": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 300 },
+        "costPoints": { "type": "integer" },
+        "category": { "type": "string", "enum": ["exemption", "leisure", "treat", "privilege"] },
+        "isActive": { "type": "boolean" },
+        "createdBy": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "familyId", "memberUids", "title", "costPoints", "category", "isActive", "createdBy", "createdAt", "updatedAt"]
+    },
+    "RewardRedemption": {
+      "title": "RewardRedemption",
+      "description": "Record of a member redeeming a perk with earned points.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "familyId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberUids": { "type": "array", "description": "Bounded list of up to 25 member UIDs." },
+        "rewardId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "rewardTitle": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "costPoints": { "type": "integer" },
+        "memberId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "status": { "type": "string", "enum": ["pending", "fulfilled"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "familyId", "memberUids", "rewardId", "rewardTitle", "costPoints", "memberId", "memberName", "status", "createdAt", "updatedAt"]
+    },
+    "FamilyNotification": {
+      "title": "FamilyNotification",
+      "description": "Real-time notification event dispatched across family members and FCM.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "familyId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberUids": { "type": "array", "description": "Bounded list of up to 25 member UIDs." },
+        "recipientId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "type": { "type": "string", "enum": ["task_assigned", "deadline_near", "task_completed", "swap_requested", "swap_resolved", "reward_redeemed", "weekly_rotation"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "body": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "relatedTaskId": { "type": "string", "maxLength": 128 },
+        "readBy": { "type": "array", "description": "Bounded list of UIDs who read this notification." },
+        "createdBy": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "familyId", "memberUids", "recipientId", "type", "title", "body", "readBy", "createdBy", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user account profile and FCM device token."
+    },
+    "/users/{userId}/memberships/{familyId}": {
+      "schema": { "$ref": "#/entities/UserMembership" },
+      "description": "List of family workspaces the user belongs to."
+    },
+    "/inviteCodes/{code}": {
+      "schema": { "$ref": "#/entities/InviteCode" },
+      "description": "Direct-get invite code lookup for joining a family workspace."
+    },
+    "/families/{familyId}": {
+      "schema": { "$ref": "#/entities/Family" },
+      "description": "Isolated family workspace root document."
+    },
+    "/families/{familyId}/members/{memberId}": {
+      "schema": { "$ref": "#/entities/FamilyMember" },
+      "description": "Family members, roles, energy/availability capacities, and points."
+    },
+    "/families/{familyId}/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/FamilyTask" },
+      "description": "Family tasks managed in real time with RBAC and fair balancing."
+    },
+    "/families/{familyId}/swaps/{swapId}": {
+      "schema": { "$ref": "#/entities/TaskSwapRequest" },
+      "description": "Task swap requests between family members."
+    },
+    "/families/{familyId}/rewards/{rewardId}": {
+      "schema": { "$ref": "#/entities/RewardPerk" },
+      "description": "Redeemable perks defined by family admins."
+    },
+    "/families/{familyId}/redemptions/{redemptionId}": {
+      "schema": { "$ref": "#/entities/RewardRedemption" },
+      "description": "Ledger of redeemed family rewards."
+    },
+    "/families/{familyId}/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/FamilyNotification" },
+      "description": "Real-time notification feed and gentle reminder triggers."
+    }
+  }
+}

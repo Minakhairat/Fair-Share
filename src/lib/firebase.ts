@@ -116,7 +116,9 @@ export async function registerForPushNotifications(): Promise<{
   try {
     const supported = await isSupported();
     if (supported && 'serviceWorker' in navigator) {
-      const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+      const registration = await navigator.serviceWorker.register(
+        `${import.meta.env.BASE_URL}firebase-messaging-sw.js`
+      );
       registration.active?.postMessage({
         type: 'INIT_FIREBASE_MESSAGING',
         config: firebaseConfig,
@@ -158,8 +160,8 @@ export function triggerGentleDeviceAlert(title: string, body: string) {
     try {
       new Notification(title, {
         body,
-        icon: '/pwa-192x192.png',
-        badge: '/pwa-192x192.png',
+        icon: `${import.meta.env.BASE_URL}pwa-192x192.png`,
+        badge: `${import.meta.env.BASE_URL}pwa-192x192.png`,
       });
     } catch {
       // Ignore Notification constructor errors in restricted iOS/iframe contexts
